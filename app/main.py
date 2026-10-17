@@ -72,17 +72,35 @@ def order_item(order: OrderRequest):
 
 @app.get("/orders")
 def all_orders():
-    return orders
+    table = cursor.execute("""SELECT orders.id, orders.customer_name, order_items.sku, order_items.name, order_items.quantity, order_items.unit_price_cents, orders.status, orders.created_at, orders.total_cents FROM orders
+            INNER JOIN order_items
+            ON orders.id = order_items.order_id;""")
+    return_orders_json = {}
+    i = 1
+    for row in table:
+        if
+        return_orders_json[f"row {i}"] = {"order_id": row[0], "customer_name": row[1], "item_sku": row[2], "item_name": row[3], "item_quantity": row[4], "item_unit_price_cents": row[5], "item_total_cents": row[5] * row[4], "order_status": row[6], "order_created_at": row[7], "order_total_cents": row[8]}
+        i += 1
+    return return_orders_json
+
 @app.get("/orders/{id}")
 def order_status(id: str):
     try:
-        return orders[id]
-    except:
-        raise HTTPException(
-                status_code = 404,
-                detail = "order not found"
-        )
+        table = cursor.execute("""SELECT orders.id, orders.customer_name, order_items.sku, order_items.name, order_items.quantity, order_items.unit_price_cents, orders.status, orders.created_at, orders.total_cents FROM orders
+        INNER JOIN order_items
+        ON orders.id = order_items.order_id
+        WHERE orders.id = ?;""", [id])
+        return_order_json = {}
+        i = 1
+        for row in table:
+            return_order_json[f"item {i}"] = {"order_id": row[0], "customer_name": row[1], "item_sku": row[2], "item_name": row[3], "item_quantity": row[4], "item_unit_price_cents": row[5], "item_total_cents": row[5] * row[4], "order_status": row[6], "order_created_at": row[7], "order_total_cents": row[8]}
+            i += 1
+        if not return_order_json:
+            raise Exception()
+        return return_order_json
+    except Exception:
+            raise HTTPException(status_code = 404, detail = "oops! order_id not found")
 
 @app.get("/health")
 def health():
-    return {"status": "daves hot chicken"}
+    return {"craving": "daves hot chicken"}
