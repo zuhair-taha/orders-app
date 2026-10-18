@@ -29,6 +29,17 @@ cursor.execute("""CREATE TABLE IF NOT EXISTS order_items (
 connection.commit()
 
 orders = {} # dict to process orders before inserting into database
+sku_id = {"car": "sku1", "bike": "sku2", "truck": "sku3", "airplane": "sku4"}
+
+class OrderItem(BaseModel):
+    sku: str # stock keeping unit
+    name: str
+    quantity: int = Field(..., gt=0)
+    unit_price_cents: int = Field(..., ge=0)
+
+class OrderRequest(BaseModel):
+    customer_name: str = Field(..., min_length = 1, max_length = 100)
+    items: list[OrderItem] = Field(..., min_length=1)
 
 def insert_into_database(order_id) -> int:
     current_order = orders[order_id]
@@ -43,15 +54,6 @@ def insert_into_database(order_id) -> int:
         return 0
     except Exception:
         return 1
-class OrderItem(BaseModel):
-    sku: str # stock keeping unit
-    name: str
-    quantity: int = Field(..., gt=0)
-    unit_price_cents: int = Field(..., ge=0)
-
-class OrderRequest(BaseModel):
-    customer_name: str = Field(..., min_length = 1, max_length = 100)
-    items: list[OrderItem] = Field(..., min_length=1)
 
 app = FastAPI()
 
@@ -59,6 +61,13 @@ app = FastAPI()
 def order_item(order: OrderRequest):
     total_cents = 0
     for item in order.items:
+        item_flag = False
+        for item_name in sku_id.keys():
+            if item.name == item_name:
+                item.sku = sku_id[item_name]
+                item_flag = True
+        if not item_flag:
+            raise HTTPException(status_code = 404, detail = "we don't sell that item!")
         item_total = item.unit_price_cents * item.quantity
         total_cents += item_total
     order_id = str(uuid4())
@@ -72,16 +81,17 @@ def order_item(order: OrderRequest):
 
 @app.get("/orders")
 def all_orders():
-    table = cursor.execute("""SELECT orders.id, orders.customer_name, order_items.sku, order_items.name, order_items.quantity, order_items.unit_price_cents, orders.status, orders.created_at, orders.total_cents FROM orders
-            INNER JOIN order_items
-            ON orders.id = order_items.order_id;""")
-    return_orders_json = {}
-    i = 1
+    table = cursor.execute("SELECT * FROM orders;")
+    orders_json = {}
     for row in table:
-        if
-        return_orders_json[f"row {i}"] = {"order_id": row[0], "customer_name": row[1], "item_sku": row[2], "item_name": row[3], "item_quantity": row[4], "item_unit_price_cents": row[5], "item_total_cents": row[5] * row[4], "order_status": row[6], "order_created_at": row[7], "order_total_cents": row[8]}
-        i += 1
-    return return_orders_json
+        orders_json[row[0]] = {"customer_name": row[1], "status": row[2], "created_at": row[4], "total_cents": row[3], "items": {}}
+    for order_id in orders_json.keys():
+        table = cursor.execute("SELECT * FROM order_items WHERE order_id = ?;", [order_id])
+        i = 1
+        for row in table:
+            orders_json[order_id]["items"][f"item {i}"] = {"sku": row[2], "name": row[3], "quantity": row[4], "unit_price_cents": row[5]}
+            i += 1
+    return orders_json
 
 @app.get("/orders/{id}")
 def order_status(id: str):
@@ -90,14 +100,16 @@ def order_status(id: str):
         INNER JOIN order_items
         ON orders.id = order_items.order_id
         WHERE orders.id = ?;""", [id])
-        return_order_json = {}
+        order_json = {}
         i = 1
         for row in table:
-            return_order_json[f"item {i}"] = {"order_id": row[0], "customer_name": row[1], "item_sku": row[2], "item_name": row[3], "item_quantity": row[4], "item_unit_price_cents": row[5], "item_total_cents": row[5] * row[4], "order_status": row[6], "order_created_at": row[7], "order_total_cents": row[8]}
+            if i == 1:
+                order_json[row[0]] = {"customer_name": row[1], "status": row[6], "created_at": row[7], "total_cents": row[8], "items": {}}
+            order_json[row[0]]["items"][f"item {i}"] = {"sku": row[2], "name": row[3], "quantity": row[4], "unit_price_cents": row[5]}
             i += 1
-        if not return_order_json:
+        if not order_json:
             raise Exception()
-        return return_order_json
+        return order_json
     except Exception:
             raise HTTPException(status_code = 404, detail = "oops! order_id not found")
 
