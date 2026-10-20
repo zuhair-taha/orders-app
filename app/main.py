@@ -1,9 +1,14 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 from uuid import uuid4
 from datetime import datetime, timezone
 import sqlite3
 import os
+import logging
+import json
+import time
+
+logging.basicConfig(level = logging.INFO, filename = ".logs", filemode = "w", format = "%(message)s") # creates a file if does'nt exist or, opens by overwriting it if already exists
 
 connection = sqlite3.connect(os.environ.get("ORDERS_DB", "orders.db"), check_same_thread = False) # creates db if not exist, alos check_same_thread is set to False because uvicorn uses a differnet thread
 cursor = connection.cursor()
@@ -56,6 +61,17 @@ def insert_into_database(order_id) -> int:
         return 1
 
 app = FastAPI()
+
+@app.middleware("http")
+async def middleware(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    end_time = time.perf_counter()
+    duration = (end_time - start_time) * 1000 # times 1000 to convert to milliseconds
+    log = {'request_method': request.method, 'request_path': request.url.path, 'status_code': response.status_code, 'duration_in_ms': duration}
+    json_log = json.dumps(log)
+    logging.info(json_log)
+    return response
 
 @app.post("/orders", status_code = 201)
 def order_item(order: OrderRequest):
@@ -112,6 +128,21 @@ def order_status(id: str):
         return order_json
     except Exception:
             raise HTTPException(status_code = 404, detail = "oops! order_id not found")
+
+@app.get("/orders/{id}/cancel")
+def cancel_order(id: str):
+    table = cursor.execute("SELECT * FROM orders;")
+    target_row = None
+    for row in table:
+        if row[0] == id:
+            target_row = row
+    if target_row == None:
+        raise HTTPException(status_code = 404, detail = "id not found")
+    if target_row[2] == "CANCELLED":
+        raise HTTPException(status_code = 409, detail = "order already cancelled")
+    cursor.execute("UPDATE orders SET status = 'CANCELLED' WHERE id = ?;", [target_row[0]])
+    connection.commit()
+    return {"status": "CANCELLED"}
 
 @app.get("/health")
 def health():
